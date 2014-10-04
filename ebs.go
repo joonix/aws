@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -123,4 +124,83 @@ func (ebs *EbsClient) VolumesByTags(tags []TagItem) ([]EbsVolume, error) {
 	}
 
 	return set.VolumeSet.Items, nil
+}
+
+// CreateVolume creates a new volume using specified properties.
+func (ebs *EbsClient) CreateVolume(size uint, piops uint, ssd bool, az string, snapshot string, tags []TagItem) (*EbsVolume, error) {
+	req, err := http.NewRequest("GET", ebs.endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	values := req.URL.Query()
+	values.Add("Action", "CreateVolume")
+	values.Add("Size", strconv.Itoa(int(size)))
+	values.Add("AvailabilityZone", az)
+
+	if snapshot != "" {
+		values.Add("SnapshotId", snapshot)
+	}
+	if piops > 0 {
+		if !ssd {
+			return nil, errors.New("Provisioned IOPS volumes are only available as SSD")
+		}
+		values.Add("VolumeType", "io1")
+		values.Add("Iops", strconv.Itoa(int(piops)))
+	} else if ssd {
+		values.Add("VolumeType", "gp2")
+	} else {
+		values.Add("VolumeType", "standard")
+	}
+
+	req.URL.RawQuery = values.Encode()
+
+	res, err := ebs.signedRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	b, _ := ioutil.ReadAll(res.Body)
+	if res.StatusCode != 200 {
+		return nil, errors.New(string(b))
+	}
+
+	vol := new(EbsVolume)
+	if err := xml.Unmarshal(b, vol); err != nil {
+		return nil, err
+	}
+
+	// Volume is created, but creating tags is a separate request
+	if len(tags) > 0 {
+		if err = ebs.tagResource(vol.Id, tags); err != nil {
+			return nil, err
+		}
+	}
+	return vol, nil
+}
+
+func (ebs *EbsClient) tagResource(id string, tags []TagItem) error {
+	req, err := http.NewRequest("GET", ebs.endpoint, nil)
+	if err != nil {
+		return err
+	}
+	values := req.URL.Query()
+	values.Add("Action", "CreateTags")
+	values.Add("ResourceId.1", id)
+	for n, tag := range tags {
+		values.Add(fmt.Sprintf("Tag.%d.Key", n+1), tag.Key)
+		values.Add(fmt.Sprintf("Tag.%d.Value", n+1), tag.Value)
+	}
+	req.URL.RawQuery = values.Encode()
+
+	res, err := ebs.signedRequest(req)
+	if err != nil {
+		return err
+	}
+
+	if res.StatusCode != 200 {
+		b, _ := ioutil.ReadAll(res.Body)
+		return errors.New(string(b))
+	}
+
+	return nil
 }
