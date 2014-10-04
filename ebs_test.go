@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 )
 
 func TestVolumeByName(t *testing.T) {
@@ -128,12 +127,12 @@ func TestCreateNew(t *testing.T) {
 }
 
 func TestCreateNewPiops(t *testing.T) {
-	called := make(chan bool)
+	called := false
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if vt := r.URL.Query().Get("VolumeType"); vt != "io1" {
 			t.Error("Expected VolumeType to be io1")
 		}
-		close(called)
+		called = true
 	}))
 	defer ts.Close()
 
@@ -149,13 +148,74 @@ func TestCreateNewPiops(t *testing.T) {
 	}
 
 	_, err = ebs.CreateVolume(1, 1000, true, "eu-west-1a", "", []TagItem{})
-	select {
-	case <-called:
-	case <-time.After(time.Second):
+	if !called {
 		t.Error("No request was made")
 	}
 }
 
 func TestAttachVolume(t *testing.T) {
-	t.Skip("Not implemented yet")
+	calls := []string{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		replies := map[string]string{
+			"DescribeInstanceAttribute": `<?xml version="1.0" encoding="UTF-8"?>
+<DescribeInstanceAttributeResponse xmlns="http://ec2.amazonaws.com/doc/2014-05-01/">
+    <requestId>8c79a02c-1918-47d6-80b5-bbc9b91d9030</requestId>
+    <instanceId>i-7ae3b239</instanceId>
+    <blockDeviceMapping>
+        <item>
+            <deviceName>/dev/xvda</deviceName>
+            <ebs>
+                <volumeId>vol-38634e33</volumeId>
+                <status>attached</status>
+                <attachTime>2014-10-02T16:11:16.000Z</attachTime>
+                <deleteOnTermination>true</deleteOnTermination>
+            </ebs>
+        </item>
+        <item>
+            <deviceName>/dev/sdf</deviceName>
+            <ebs>
+                <volumeId>vol-9d13337</volumeId>
+                <status>attached</status>
+                <attachTime>2014-10-04T19:40:53.000Z</attachTime>
+                <deleteOnTermination>false</deleteOnTermination>
+            </ebs>
+        </item>
+    </blockDeviceMapping>
+</DescribeInstanceAttributeResponse>`,
+			"AttachVolume": `<?xml version="1.0" encoding="UTF-8"?>
+<AttachVolumeResponse xmlns="http://ec2.amazonaws.com/doc/2014-05-01/">
+    <requestId>5f98fb9c-3b4b-4974-ae19-0d8bb763e017</requestId>
+    <volumeId>vol-9d351996</volumeId>
+    <instanceId>i-7ae3b239</instanceId>
+    <device>/dev/sdf</device>
+    <status>attaching</status>
+    <attachTime>2014-10-04T19:40:53.927Z</attachTime>
+</AttachVolumeResponse>`}
+
+		action := r.URL.Query().Get("Action")
+		if reply, ok := replies[action]; !ok {
+			t.Errorf("Invalid action '%s'")
+		} else {
+			fmt.Fprint(w, reply)
+			calls = append(calls, action)
+		}
+	}))
+	defer ts.Close()
+
+	ebs, err := NewEbsClient(http.DefaultClient, ts.URL, defaultSigner)
+	if err != nil {
+		t.Error(err)
+	}
+
+	path, err := ebs.AttachVolume("vol-9d351996", "i-7ae3b239")
+	if err != nil {
+		t.Error(err)
+	}
+	if path != "/dev/sdg" {
+		t.Error("Expected path to be set correctly, got", path)
+	}
+
+	if len(calls) != 2 {
+		t.Error("Expected exactly 2 calls to be made")
+	}
 }

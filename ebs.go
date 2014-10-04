@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -31,6 +32,16 @@ func (f RequestSignerFunc) Sign(r *http.Request) {
 type TagItem struct {
 	Key   string `xml:"key"`
 	Value string `xml:"value"`
+}
+
+type DeviceMapping struct {
+	Device string `xml:"deviceName"`
+	Info   struct {
+		Id                  string    `xml:"volumeId"`
+		Status              string    `xml:"status"`
+		AttachAt            time.Time `xml:"attachTime"`
+		DeleteOnTermination bool      `xml:"deleteOnTermination"`
+	} `xml:"ebs"`
 }
 
 type EbsVolume struct {
@@ -127,7 +138,7 @@ func (ebs *EbsClient) VolumesByTags(tags []TagItem) ([]EbsVolume, error) {
 }
 
 // CreateVolume creates a new volume using specified properties.
-func (ebs *EbsClient) CreateVolume(size uint, piops uint, ssd bool, az string, snapshot string, tags []TagItem) (*EbsVolume, error) {
+func (ebs *EbsClient) CreateVolume(size uint, piops uint, ssd bool, az, snapshot string, tags []TagItem) (*EbsVolume, error) {
 	req, err := http.NewRequest("GET", ebs.endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -203,4 +214,82 @@ func (ebs *EbsClient) tagResource(id string, tags []TagItem) error {
 	}
 
 	return nil
+}
+
+func (ebs *EbsClient) AttachVolume(id, instance string) (device string, err error) {
+	var mapping []DeviceMapping
+	mapping, err = ebs.getBlockDeviceMapping(instance)
+	if err != nil {
+		return
+	}
+
+	device = "/dev/sdf"
+	for _, item := range mapping {
+		if !strings.HasPrefix(item.Device, "/dev/sd") {
+			continue
+		}
+		// Put our device one step ahead of anyone else by naively shifting the last byte
+		if item.Device >= device {
+			b := []byte(item.Device)
+			device = string(append(b[:len(b)-1], b[len(b)-1]+1))
+		}
+	}
+
+	var req *http.Request
+	req, err = http.NewRequest("GET", ebs.endpoint, nil)
+	if err != nil {
+		return
+	}
+
+	values := req.URL.Query()
+	values.Add("Action", "AttachVolume")
+	values.Add("InstanceId", instance)
+	values.Add("VolumeId", id)
+	values.Add("Device", device)
+	req.URL.RawQuery = values.Encode()
+
+	res, err := ebs.signedRequest(req)
+	if err != nil {
+		return
+	}
+
+	if res.StatusCode != 200 {
+		b, _ := ioutil.ReadAll(res.Body)
+		err = errors.New(string(b))
+	}
+
+	return
+}
+
+func (ebs *EbsClient) getBlockDeviceMapping(instance string) ([]DeviceMapping, error) {
+	req, err := http.NewRequest("GET", ebs.endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	values := req.URL.Query()
+	values.Add("Action", "DescribeInstanceAttribute")
+	values.Add("InstanceId", instance)
+	values.Add("Attribute", "blockDeviceMapping")
+	req.URL.RawQuery = values.Encode()
+
+	res, err := ebs.signedRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	b, _ := ioutil.ReadAll(res.Body)
+	if res.StatusCode != 200 {
+		return nil, errors.New(string(b))
+	}
+
+	m := &struct {
+		Mappings struct {
+			Item []DeviceMapping `xml:"item"`
+		} `xml:"blockDeviceMapping"`
+	}{}
+	if err := xml.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+
+	return m.Mappings.Item, nil
 }

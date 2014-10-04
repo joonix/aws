@@ -10,6 +10,8 @@ import (
 
 var (
 	integration = flag.Bool("integration", false, "Wether to do real AWS requests or not")
+	instance    = flag.String("instance", "i-7ae3b239", "Instance id to run experiments on")
+	volume      = flag.String("volume", "vol-9d351996", "Volume id to run experiments with")
 	endpoint    = flag.String("endpoint", "https://ec2.eu-west-1.amazonaws.com", "AWS Endpoint to use")
 )
 
@@ -74,4 +76,26 @@ func TestCreateVolumeIntegration(t *testing.T) {
 	}
 
 	t.Log(testVolume)
+}
+
+func TestAttachVolumeIntegration(t *testing.T) {
+	if !*integration {
+		t.Skip("Integration tests not enabled")
+		return
+	}
+
+	client := &http.Client{Transport: newLoggingTransport()}
+	ebs, err := NewEbsClient(client, *endpoint, defaultSigner)
+	if err != nil {
+		t.Error(err)
+	}
+
+	path, err := ebs.AttachVolume(*volume, *instance)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if path != "/dev/sdf" {
+		t.Error("Expected path to be set correctly")
+	}
 }
