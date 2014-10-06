@@ -99,6 +99,31 @@ type EbsVolumeSet struct {
 	} `xml:"volumeSet"`
 }
 
+type SnapshotStatus string
+
+var (
+	SnapshotCompleted SnapshotStatus = "completed"
+	SnapshotPending   SnapshotStatus = "pending"
+	SnapshotError     SnapshotStatus = "error"
+)
+
+func (s SnapshotStatus) String() string {
+	return string(s)
+}
+
+type EbsSnapshot struct {
+	Id          string         `xml:"snapshotId"`
+	VolumeId    string         `xml:"volumeId"`
+	Status      SnapshotStatus `xml:"status"`
+	Description string         `xml:"description"`
+}
+
+type EbsSnapshotSet struct {
+	SnapshotSet struct {
+		Items []EbsSnapshot `xml:"item"`
+	} `xml:"snapshotSet"`
+}
+
 // EbsClient handles the actions related to Elastic Block Storage.
 type EbsClient struct {
 	client   *http.Client
@@ -260,6 +285,29 @@ func (ebs *EbsClient) CreateVolume(size uint, piops uint, ssd bool, az, snapshot
 	return vol, nil
 }
 
+func (ebs *EbsClient) DeleteVolume(id string) error {
+	req, err := http.NewRequest("GET", ebs.endpoint, nil)
+	if err != nil {
+		return err
+	}
+	values := req.URL.Query()
+	values.Add("Action", "DeleteVolume")
+	values.Add("VolumeId", id)
+	req.URL.RawQuery = values.Encode()
+
+	res, err := ebs.signedRequest(req)
+	if err != nil {
+		return err
+	}
+
+	b, _ := ioutil.ReadAll(res.Body)
+	if res.StatusCode != 200 {
+		return errors.New(string(b))
+	}
+
+	return nil
+}
+
 func (ebs *EbsClient) tagResource(id string, tags []TagItem) error {
 	req, err := http.NewRequest("GET", ebs.endpoint, nil)
 	if err != nil {
@@ -394,4 +442,87 @@ func (ebs *EbsClient) getBlockDeviceMapping(instance string) ([]DeviceMapping, e
 	}
 
 	return m.Mappings.Item, nil
+}
+
+func (ebs *EbsClient) CreateSnapshot(volume, description string) (*EbsSnapshot, error) {
+	req, err := http.NewRequest("GET", ebs.endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	values := req.URL.Query()
+	values.Add("Action", "CreateSnapshot")
+	values.Add("Description", description)
+	values.Add("VolumeId", volume)
+	req.URL.RawQuery = values.Encode()
+
+	res, err := ebs.signedRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	b, _ := ioutil.ReadAll(res.Body)
+	if res.StatusCode != 200 {
+		return nil, errors.New(string(b))
+	}
+
+	snap := new(EbsSnapshot)
+	if err := xml.Unmarshal(b, snap); err != nil {
+		return nil, err
+	}
+
+	return snap, nil
+}
+
+func (ebs *EbsClient) SnapshotById(id string) (*EbsSnapshot, error) {
+	req, err := http.NewRequest("GET", ebs.endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	values := req.URL.Query()
+	values.Add("Action", "DescribeSnapshots")
+	values.Add("SnapshotId.1", id)
+	req.URL.RawQuery = values.Encode()
+
+	res, err := ebs.signedRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	b, _ := ioutil.ReadAll(res.Body)
+	if res.StatusCode != 200 {
+		return nil, errors.New(string(b))
+	}
+
+	snapset := new(EbsSnapshotSet)
+	if err := xml.Unmarshal(b, snapset); err != nil {
+		return nil, err
+	}
+
+	if len(snapset.SnapshotSet.Items) != 1 {
+		return nil, errors.New("Could not find the specified snapshot")
+	}
+	return &snapset.SnapshotSet.Items[0], nil
+}
+
+func (ebs *EbsClient) DeleteSnapshot(id string) error {
+	req, err := http.NewRequest("GET", ebs.endpoint, nil)
+	if err != nil {
+		return err
+	}
+	values := req.URL.Query()
+	values.Add("Action", "DeleteSnapshot")
+	values.Add("SnapshotId", id)
+	req.URL.RawQuery = values.Encode()
+
+	res, err := ebs.signedRequest(req)
+	if err != nil {
+		return err
+	}
+
+	b, _ := ioutil.ReadAll(res.Body)
+	if res.StatusCode != 200 {
+		return errors.New(string(b))
+	}
+
+	return nil
 }

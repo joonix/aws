@@ -265,3 +265,80 @@ func TestDetachVolume(t *testing.T) {
 		t.Error("Expecting attachement status, got:", status)
 	}
 }
+
+func TestCreateSnapshot(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a := "CreateSnapshot"; r.URL.Query().Get("Action") != a {
+			t.Errorf("Expected Action to be %s", a)
+		}
+		fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>
+<CreateSnapshotResponse xmlns="http://ec2.amazonaws.com/doc/2014-05-01/">
+    <requestId>fadf1397-e6d3-423d-abd4-ba44fdc247f4</requestId>
+    <snapshotId>snap-1db38de7</snapshotId>
+    <volumeId>vol-fc5e71f7</volumeId>
+    <status>pending</status>
+    <startTime>2014-10-06T11:43:23.000Z</startTime>
+    <progress/>
+    <ownerId>243444709602</ownerId>
+    <volumeSize>1</volumeSize>
+    <encrypted>false</encrypted>
+    <description>testing</description>
+</CreateSnapshotResponse>`)
+	}))
+	defer ts.Close()
+
+	ebs, err := NewEbsClient(http.DefaultClient, ts.URL, defaultSigner)
+	if err != nil {
+		t.Error(err)
+	}
+
+	snap, err := ebs.CreateSnapshot(*volume, "testing")
+	if err != nil {
+		t.Error(err)
+	}
+	if snap.Id != "snap-1db38de7" {
+		t.Error("Expected snapshot id")
+	}
+	if status := snap.Status; status != SnapshotPending {
+		t.Error("Expecting attachement status, got:", status)
+	}
+}
+
+func TestGetSnapshotById(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a := "DescribeSnapshots"; r.URL.Query().Get("Action") != a {
+			t.Errorf("Expected Action to be %s", a)
+		}
+		fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>
+<DescribeSnapshotsResponse xmlns="http://ec2.amazonaws.com/doc/2014-05-01/">
+    <requestId>cb4f2097-5029-4176-9418-3d7bdb2d92f2</requestId>
+    <snapshotSet>
+        <item>
+            <snapshotId>snap-1db38de7</snapshotId>
+            <volumeId>vol-fc5e71f7</volumeId>
+            <status>completed</status>
+            <startTime>2014-10-06T11:43:23.000Z</startTime>
+            <progress>100%</progress>
+            <ownerId>243444709602</ownerId>
+            <volumeSize>1</volumeSize>
+            <description>testing</description>
+            <encrypted>false</encrypted>
+        </item>
+    </snapshotSet>
+</DescribeSnapshotsResponse>`)
+	}))
+	defer ts.Close()
+
+	ebs, err := NewEbsClient(http.DefaultClient, ts.URL, defaultSigner)
+	if err != nil {
+		t.Error(err)
+	}
+
+	snap, err := ebs.SnapshotById("snap-1db38de7")
+	if err != nil {
+		t.Error(err)
+	}
+	if snap.Status != SnapshotCompleted {
+		t.Error("Expected snapshot status to be", SnapshotCompleted)
+	}
+}

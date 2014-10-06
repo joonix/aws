@@ -12,6 +12,7 @@ var (
 	integration = flag.Bool("integration", false, "Wether to do real AWS requests or not")
 	instance    = flag.String("instance", "i-7ae3b239", "Instance id to run experiments on")
 	volume      = flag.String("volume", "vol-9d351996", "Volume id to run experiments with")
+	snapshot    = flag.String("snapshot", "snap-1db38de7", "Snapshot id to run experiments with")
 	endpoint    = flag.String("endpoint", "https://ec2.eu-west-1.amazonaws.com", "AWS Endpoint to use")
 )
 
@@ -140,5 +141,81 @@ func TestDetachVolumeIntegration(t *testing.T) {
 	}
 	if status != VolumeDetaching {
 		t.Error("Expected volume to start detaching")
+	}
+}
+
+func TestCreateSnapshotIntegration(t *testing.T) {
+	if !*integration {
+		t.Skip("Integration tests not enabled")
+		return
+	}
+
+	client := &http.Client{Transport: newLoggingTransport()}
+	ebs, err := NewEbsClient(client, *endpoint, defaultSigner)
+	if err != nil {
+		t.Error(err)
+	}
+
+	testSnapshot, err := ebs.CreateSnapshot(*volume, "integration-test")
+	if err != nil {
+		t.Error(err)
+	}
+
+	t.Log(testSnapshot)
+}
+
+func TestSnapshotByIdIntegration(t *testing.T) {
+	if !*integration {
+		t.Skip("Integration tests not enabled")
+		return
+	}
+
+	client := &http.Client{Transport: newLoggingTransport()}
+	ebs, err := NewEbsClient(client, *endpoint, defaultSigner)
+	if err != nil {
+		t.Error(err)
+	}
+	snap, err := ebs.SnapshotById(*snapshot)
+	if err != nil {
+		t.Error(err)
+	}
+	if snap.Status != SnapshotCompleted {
+		t.Error("Expected snapshot status to be", SnapshotCompleted)
+	}
+
+	t.Log(snap)
+}
+
+func TestDeleteSnapshotIntegration(t *testing.T) {
+	if !*integration {
+		t.Skip("Integration tests not enabled")
+		return
+	}
+
+	client := &http.Client{Transport: newLoggingTransport()}
+	ebs, err := NewEbsClient(client, *endpoint, defaultSigner)
+	if err != nil {
+		t.Error(err)
+	}
+	err = ebs.DeleteSnapshot(*snapshot)
+	if err != nil {
+		t.Error(err)
+	}
+}
+
+func TestDeleteVolumeIntegration(t *testing.T) {
+	if !*integration {
+		t.Skip("Integration tests not enabled")
+		return
+	}
+
+	client := &http.Client{Transport: newLoggingTransport()}
+	ebs, err := NewEbsClient(client, *endpoint, defaultSigner)
+	if err != nil {
+		t.Error(err)
+	}
+	err = ebs.DeleteVolume(*volume)
+	if err != nil {
+		t.Error(err)
 	}
 }
