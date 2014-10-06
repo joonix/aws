@@ -23,7 +23,16 @@ func TestVolumeByName(t *testing.T) {
             <availabilityZone>eu-west-1a</availabilityZone>
             <status>available</status>
             <createTime>2014-10-03T15:18:42.354Z</createTime>
-            <attachmentSet/>
+            <attachmentSet>
+                <item>
+                    <volumeId>vol-72d8f579</volumeId>
+                    <instanceId>i-7ae3b239</instanceId>
+                    <device>/dev/sdf</device>
+                    <status>attached</status>
+                    <attachTime>2014-10-06T08:58:05.000Z</attachTime>
+                    <deleteOnTermination>false</deleteOnTermination>
+                </item>
+            </attachmentSet>
             <tagSet>
                 <item>
                     <key>Name</key>
@@ -70,6 +79,12 @@ func TestVolumeByName(t *testing.T) {
 	}
 	if vol[0].TagSet.Items[0].Value != "test" {
 		t.Error("Name tag value incorrect")
+	}
+	if len(vol[0].AttachmentSet.Items) != 1 {
+		t.Error("Expected volume attachement")
+	}
+	if vol[0].AttachmentSet.Items[0].InstanceId != "i-7ae3b239" {
+		t.Error("Invalid instance id for volume attachement")
 	}
 }
 
@@ -217,5 +232,36 @@ func TestAttachVolume(t *testing.T) {
 
 	if len(calls) != 2 {
 		t.Error("Expected exactly 2 calls to be made")
+	}
+}
+
+func TestDetachVolume(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a := "DetachVolume"; r.URL.Query().Get("Action") != a {
+			t.Errorf("Expected Action to be %s", a)
+		}
+		fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>
+<DetachVolumeResponse xmlns="http://ec2.amazonaws.com/doc/2014-05-01/">
+    <requestId>dd109bab-a54b-4557-9cc9-ba99f0fcb68e</requestId>
+    <volumeId>vol-fc5e71f7</volumeId>
+    <instanceId>i-7ae3b239</instanceId>
+    <device>/dev/sdf</device>
+    <status>detaching</status>
+    <attachTime>2014-10-06T08:58:05.000Z</attachTime>
+</DetachVolumeResponse>`)
+	}))
+	defer ts.Close()
+
+	ebs, err := NewEbsClient(http.DefaultClient, ts.URL, defaultSigner)
+	if err != nil {
+		t.Error(err)
+	}
+
+	status, err := ebs.DetachVolume(*volume)
+	if err != nil {
+		t.Error(err)
+	}
+	if status != VolumeDetaching {
+		t.Error("Expecting attachement status, got:", status)
 	}
 }

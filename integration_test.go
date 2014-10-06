@@ -99,3 +99,24 @@ func TestAttachVolumeIntegration(t *testing.T) {
 		t.Error("Expected path to be set correctly")
 	}
 }
+
+func TestDetachVolumeIntegration(t *testing.T) {
+	if !*integration {
+		t.Skip("Integration tests not enabled")
+		return
+	}
+
+	client := &http.Client{Transport: newLoggingTransport()}
+	ebs, err := NewEbsClient(client, *endpoint, defaultSigner)
+	if err != nil {
+		t.Error(err)
+	}
+
+	status, err := ebs.DetachVolume(*volume)
+	if err != nil {
+		t.Error(err)
+	}
+	if status != VolumeDetaching {
+		t.Error("Expected volume to start detaching")
+	}
+}

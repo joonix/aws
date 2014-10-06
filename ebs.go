@@ -37,11 +37,30 @@ type TagItem struct {
 type DeviceMapping struct {
 	Device string `xml:"deviceName"`
 	Info   struct {
-		Id                  string    `xml:"volumeId"`
-		Status              string    `xml:"status"`
-		AttachAt            time.Time `xml:"attachTime"`
-		DeleteOnTermination bool      `xml:"deleteOnTermination"`
+		Id                  string            `xml:"volumeId"`
+		Status              AttachementStatus `xml:"status"`
+		AttachAt            time.Time         `xml:"attachTime"`
+		DeleteOnTermination bool              `xml:"deleteOnTermination"`
 	} `xml:"ebs"`
+}
+
+type AttachementStatus string
+
+var (
+	VolumeAttaching AttachementStatus = "attaching"
+	VolumeAttached  AttachementStatus = "attached"
+	VolumeDetaching AttachementStatus = "detaching"
+	VolumeDetached  AttachementStatus = "detached"
+)
+
+func (s AttachementStatus) String() string {
+	return string(s)
+}
+
+type EbsVolumeAttachementResponse struct {
+	InstanceId string            `xml:"instanceId"`
+	Status     AttachementStatus `xml:"status"`
+	AttachedAt time.Time         `xml:"attachTime"`
 }
 
 type EbsVolume struct {
@@ -49,7 +68,10 @@ type EbsVolume struct {
 	AvailabilityZone string    `xml:"availabilityZone"`
 	Status           string    `xml:"status"`
 	CreatedAt        time.Time `xml:"createTime"`
-	TagSet           struct {
+	AttachmentSet    struct {
+		Items []EbsVolumeAttachementResponse `xml:"item"`
+	} `xml:"attachmentSet"`
+	TagSet struct {
 		Items []TagItem `xml:"item"`
 	} `xml:"tagSet"`
 }
@@ -257,6 +279,37 @@ func (ebs *EbsClient) AttachVolume(id, instance string) (device string, err erro
 		b, _ := ioutil.ReadAll(res.Body)
 		err = errors.New(string(b))
 	}
+
+	return
+}
+
+func (ebs *EbsClient) DetachVolume(id string) (status AttachementStatus, err error) {
+	var req *http.Request
+	req, err = http.NewRequest("GET", ebs.endpoint, nil)
+	if err != nil {
+		return
+	}
+
+	values := req.URL.Query()
+	values.Add("Action", "DetachVolume")
+	values.Add("VolumeId", id)
+	req.URL.RawQuery = values.Encode()
+
+	var res *http.Response
+	res, err = ebs.signedRequest(req)
+	if err != nil {
+		return
+	}
+
+	b, _ := ioutil.ReadAll(res.Body)
+	if res.StatusCode != 200 {
+		err = errors.New(string(b))
+		return
+	}
+
+	volres := new(EbsVolumeAttachementResponse)
+	err = xml.Unmarshal(b, volres)
+	status = volres.Status
 
 	return
 }
