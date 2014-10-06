@@ -54,6 +54,28 @@ func TestVolumeByTagsIntegration(t *testing.T) {
 	t.Log(vols)
 }
 
+func TestVolumeByIdIntegration(t *testing.T) {
+	if !*integration {
+		t.Skip("Integration tests not enabled")
+		return
+	}
+
+	client := &http.Client{Transport: newLoggingTransport()}
+	ebs, err := NewEbsClient(client, *endpoint, defaultSigner)
+	if err != nil {
+		t.Error(err)
+	}
+	vol, err := ebs.VolumeById(*volume)
+	if err != nil {
+		t.Error(err)
+	}
+	if vol.Status != VolumeAvailable {
+		t.Error("Expected volume status to be", VolumeAvailable)
+	}
+
+	t.Log(vol)
+}
+
 func TestCreateVolumeIntegration(t *testing.T) {
 	if !*integration {
 		t.Skip("Integration tests not enabled")

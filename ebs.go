@@ -58,22 +58,39 @@ func (s AttachementStatus) String() string {
 }
 
 type EbsVolumeAttachementResponse struct {
+	client     *EbsClient
 	InstanceId string            `xml:"instanceId"`
+	VolumeId   string            `xml:"volumeId"`
 	Status     AttachementStatus `xml:"status"`
-	AttachedAt time.Time         `xml:"attachTime"`
 }
 
 type EbsVolume struct {
-	Id               string    `xml:"volumeId"`
-	AvailabilityZone string    `xml:"availabilityZone"`
-	Status           string    `xml:"status"`
-	CreatedAt        time.Time `xml:"createTime"`
+	Id               string       `xml:"volumeId"`
+	AvailabilityZone string       `xml:"availabilityZone"`
+	Status           VolumeStatus `xml:"status"`
+	CreatedAt        time.Time    `xml:"createTime"`
 	AttachmentSet    struct {
 		Items []EbsVolumeAttachementResponse `xml:"item"`
 	} `xml:"attachmentSet"`
 	TagSet struct {
 		Items []TagItem `xml:"item"`
 	} `xml:"tagSet"`
+}
+
+type VolumeStatus string
+
+//  creating | available | in-use | deleting | deleted | error
+var (
+	VolumeInUse     VolumeStatus = "in-use"
+	VolumeCreating  VolumeStatus = "creating"
+	VolumeAvailable VolumeStatus = "available"
+	VolumeDeleting  VolumeStatus = "deleting"
+	VolumeDeleted   VolumeStatus = "deleted"
+	VolumeError     VolumeStatus = "error"
+)
+
+func (v VolumeStatus) String() string {
+	return string(v)
 }
 
 type EbsVolumeSet struct {
@@ -157,6 +174,38 @@ func (ebs *EbsClient) VolumesByTags(tags []TagItem) ([]EbsVolume, error) {
 	}
 
 	return set.VolumeSet.Items, nil
+}
+
+// VolumeById will return the volume that matches the specified id.
+func (ebs *EbsClient) VolumeById(id string) (*EbsVolume, error) {
+	req, err := http.NewRequest("GET", ebs.endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	values := req.URL.Query()
+	values.Add("Action", "DescribeVolumes")
+	values.Add("VolumeId.1", id)
+	req.URL.RawQuery = values.Encode()
+
+	res, err := ebs.signedRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	b, _ := ioutil.ReadAll(res.Body)
+	if res.StatusCode != 200 {
+		return nil, errors.New(string(b))
+	}
+
+	set := new(EbsVolumeSet)
+	if err := xml.Unmarshal(b, set); err != nil {
+		return nil, err
+	}
+
+	if len(set.VolumeSet.Items) != 1 {
+		return nil, errors.New("Could not find the specified volume")
+	}
+	return &set.VolumeSet.Items[0], nil
 }
 
 // CreateVolume creates a new volume using specified properties.
