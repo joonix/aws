@@ -1,16 +1,27 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"github.com/codegangsta/cli"
 	"github.com/joonix/aws"
 	"log"
+	"net/http"
 	"os"
 	"time"
 )
 
+var sslClient *http.Client
+
+func init() {
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM(pemCerts)
+	sslClient = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
+}
+
 func attachEbs(c *cli.Context) {
-	client, err := aws.NewEbsClient(nil, c.GlobalString("endpoint"), nil)
+	client, err := aws.NewEbsClient(sslClient, c.GlobalString("endpoint"), nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -36,7 +47,7 @@ func attachEbs(c *cli.Context) {
 	var volume *aws.EbsVolume
 	if len(vols) == 1 {
 		if vols[0].AvailabilityZone != instanceAz {
-			// Volume needs to be creted in the same AZ as the instance using a snapshot.
+			// Volume needs to be migrated to the same AZ as the instance by using a snapshot.
 			snap, err := client.CreateSnapshot(vols[0].Id, "migrate_zone")
 			if err != nil {
 				log.Fatalf("Error creating snapshot: %s", err)
@@ -75,14 +86,33 @@ func attachEbs(c *cli.Context) {
 	}
 
 	if volume == nil {
-		if vol, err := client.CreateVolume(uint(c.Int("size")), uint(c.Int("piops")), c.Bool("ssd"), instanceAz, snapshot, tags); err != nil {
+		var err error
+		if volume, err = client.CreateVolume(uint(c.Int("size")), uint(c.Int("piops")), c.Bool("ssd"), instanceAz, snapshot, tags); err != nil {
 			log.Fatal(err)
 		} else {
-			volume = vol
-			log.Println("Created volume", volume.Id)
-		}
+			wait := make(chan bool)
+			go func() {
+				defer close(wait)
+				for {
+					time.Sleep(time.Second)
+					if volume, err = client.VolumeById(volume.Id); err != nil {
+						log.Fatalf("Could not update volume status for %s", volume.Id)
+					}
+					if volume.Status == aws.VolumeAvailable {
+						return
+					}
+				}
+			}()
 
+			select {
+			case <-time.After(30 * time.Second):
+				log.Fatalf("Timed out waiting for volume %s to become available", volume.Id)
+			case <-wait:
+				log.Println("Created volume", volume.Id)
+			}
+		}
 	}
+
 	// Finally attach volume and print path
 	path, err := client.AttachVolume(volume.Id, instanceId)
 	if err != nil {
