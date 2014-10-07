@@ -20,6 +20,30 @@ func init() {
 	sslClient = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
 }
 
+func detachEbs(c *cli.Context) {
+	client, err := aws.NewEbsClient(sslClient, c.GlobalString("endpoint"), nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	tags := []aws.TagItem{
+		aws.TagItem{"Name", c.String("name")},
+	}
+	vols, err := client.VolumesByTags(tags)
+	if err != nil {
+		log.Fatalf("Not able to find the volume by name %s: %s", c.String("name"), err)
+	}
+
+	if len(vols) != 1 {
+		log.Fatalf("Expected exactly one volume by the name %s", c.String("name"))
+	}
+	status, err := client.DetachVolume(vols[0].Id)
+	if err != nil {
+		log.Fatalf("Could not detach volume: %s", err)
+	}
+	log.Println(status)
+}
+
 func attachEbs(c *cli.Context) {
 	client, err := aws.NewEbsClient(sslClient, c.GlobalString("endpoint"), nil)
 	if err != nil {
@@ -113,6 +137,15 @@ func attachEbs(c *cli.Context) {
 		}
 	}
 
+	// Check if we already have this volume attached to this instance
+	if volume.Status == aws.VolumeInUse {
+		attachment := volume.AttachmentSet.Items[0]
+		if attachment.InstanceId == instanceId {
+			fmt.Println(attachment.Device)
+			return
+		}
+	}
+
 	// Finally attach volume and print path
 	path, err := client.AttachVolume(volume.Id, instanceId)
 	if err != nil {
@@ -182,6 +215,18 @@ func main() {
 						},
 					},
 					Action: attachEbs,
+				},
+				{
+					Name:  "detach",
+					Usage: "detach a volume from an instance",
+					Flags: []cli.Flag{
+						cli.StringFlag{
+							Name:   "name",
+							Usage:  "name tag of volume to detach",
+							EnvVar: "EBS_DETACH_NAME",
+						},
+					},
+					Action: detachEbs,
 				},
 			},
 		},

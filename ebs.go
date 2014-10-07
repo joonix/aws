@@ -62,6 +62,7 @@ type EbsVolumeAttachementResponse struct {
 	InstanceId string            `xml:"instanceId"`
 	VolumeId   string            `xml:"volumeId"`
 	Status     AttachementStatus `xml:"status"`
+	Device     string            `xml:"device"`
 }
 
 type EbsVolume struct {
