@@ -94,7 +94,7 @@ func attachEbs(c *cli.Context) {
 				}
 			}()
 			select {
-			case <-time.After(30 * time.Second):
+			case <-time.After(10 * time.Minute):
 				log.Fatalf("Timed out waiting for snapshot %s to complete", snapshot)
 			case <-wait:
 				log.Println("Created snapshot", snapshot)
@@ -129,7 +129,7 @@ func attachEbs(c *cli.Context) {
 			}()
 
 			select {
-			case <-time.After(30 * time.Second):
+			case <-time.After(10 * time.Minute):
 				log.Fatalf("Timed out waiting for volume %s to become available", volume.Id)
 			case <-wait:
 				log.Println("Created volume", volume.Id)
