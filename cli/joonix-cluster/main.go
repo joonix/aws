@@ -148,6 +148,15 @@ func attachEbs(c *cli.Context) {
 	fmt.Println(path)
 }
 
+func associateEip(c *cli.Context) {
+	sr := aws.NewSignedRequester(sslClient, c.GlobalString("endpoint"), nil)
+
+	if err := aws.AssociateAddress(sr, c.String("instance"), c.String("ip")); err != nil {
+		log.Fatalf("Could not associate ip: %s", err)
+	}
+	fmt.Println(c.String("ip"))
+}
+
 func main() {
 	log.SetPrefix("")
 
@@ -221,6 +230,29 @@ func main() {
 						},
 					},
 					Action: detachEbs,
+				},
+			},
+		},
+		{
+			Name:  "eip",
+			Usage: "options for Elastic Ip operations",
+			Subcommands: []cli.Command{
+				{
+					Name:  "associate",
+					Usage: "associate an existing IP to specified VPC instance id",
+					Flags: []cli.Flag{
+						cli.StringFlag{
+							Name:   "instance",
+							Usage:  "instance id to associate with",
+							EnvVar: "EIP_ASSOCIATE_INSTANCE",
+						},
+						cli.StringFlag{
+							Name:   "ip",
+							Usage:  "ip to associate",
+							EnvVar: "EIP_ASSOCIATE_IP",
+						},
+					},
+					Action: associateEip,
 				},
 			},
 		},

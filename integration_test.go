@@ -10,6 +10,7 @@ import (
 
 var (
 	integration = flag.Bool("integration", false, "Wether to do real AWS requests or not")
+	eip         = flag.String("eip", "54.171.106.174", "Elastic IP for testing")
 	instance    = flag.String("instance", "i-7ae3b239", "Instance id to run experiments on")
 	volume      = flag.String("volume", "vol-9d351996", "Volume id to run experiments with")
 	snapshot    = flag.String("snapshot", "snap-1db38de7", "Snapshot id to run experiments with")
@@ -187,6 +188,19 @@ func TestDeleteVolumeIntegration(t *testing.T) {
 	client := &http.Client{Transport: newLoggingTransport()}
 	sr := NewSignedRequester(client, *endpoint, DefaultSigner)
 	if err := DeleteVolume(sr, *volume); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestAssociateAddressIntegration(t *testing.T) {
+	if !*integration {
+		t.Skip("Integration tests not enabled")
+		return
+	}
+
+	client := &http.Client{Transport: newLoggingTransport()}
+	sr := NewSignedRequester(client, *endpoint, DefaultSigner)
+	if err := AssociateAddress(sr, *instance, *eip); err != nil {
 		t.Error(err)
 	}
 }
