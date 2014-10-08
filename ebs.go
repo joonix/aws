@@ -4,35 +4,11 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"github.com/smartystreets/go-aws-auth"
-	"io/ioutil"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 )
-
-var defaultSigner = RequestSignerFunc(func(r *http.Request) {
-	awsauth.Sign(r)
-})
-
-// RequestSigner describes how to Sign requests before sending them to Amazon Web Services API.
-type RequestSigner interface {
-	Sign(*http.Request)
-}
-
-// RequestSignerFunc wraps a function to implement the RequestSigner interface.
-type RequestSignerFunc func(*http.Request)
-
-func (f RequestSignerFunc) Sign(r *http.Request) {
-	f(r)
-}
-
-type TagItem struct {
-	Key   string `xml:"key"`
-	Value string `xml:"value"`
-}
 
 type DeviceMapping struct {
 	Device string `xml:"deviceName"`
@@ -58,7 +34,6 @@ func (s AttachementStatus) String() string {
 }
 
 type EbsVolumeAttachementResponse struct {
-	client     *EbsClient
 	InstanceId string            `xml:"instanceId"`
 	VolumeId   string            `xml:"volumeId"`
 	Status     AttachementStatus `xml:"status"`
@@ -125,73 +100,19 @@ type EbsSnapshotSet struct {
 	} `xml:"snapshotSet"`
 }
 
-// EbsClient handles the actions related to Elastic Block Storage.
-type EbsClient struct {
-	client   *http.Client
-	endpoint string
-	signer   RequestSigner
-}
-
-func NewEbsClient(client *http.Client, endpoint string, signer RequestSigner) (*EbsClient, error) {
-	ebs := new(EbsClient)
-
-	if endpoint == "" {
-		ebs.endpoint = "https://ec2.amazonaws.com"
-	} else {
-		if _, err := url.Parse(endpoint); err != nil {
-			return nil, err
-		}
-		ebs.endpoint = endpoint
-	}
-	if client == nil {
-		ebs.client = http.DefaultClient
-	} else {
-		ebs.client = client
-	}
-	if signer == nil {
-		ebs.signer = defaultSigner
-	} else {
-		ebs.signer = signer
-
-	}
-
-	return ebs, nil
-}
-
-// signedRequest applies the signature the the request using provided RequestSigner.
-func (ebs *EbsClient) signedRequest(req *http.Request) (*http.Response, error) {
-	// Version param is required for Amazon to understand the request.
-	values := req.URL.Query()
-	values.Add("Version", "2014-05-01")
-	req.URL.RawQuery = values.Encode()
-
-	ebs.signer.Sign(req)
-	return ebs.client.Do(req)
-}
-
 // VolumesByTags will return list of volumes that matches the specified tags.
-func (ebs *EbsClient) VolumesByTags(tags []TagItem) ([]EbsVolume, error) {
-	req, err := http.NewRequest("GET", ebs.endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	values := req.URL.Query()
+func VolumesByTags(sr SignedRequester, tags []TagItem) ([]EbsVolume, error) {
+	values := make(url.Values)
 	values.Add("Action", "DescribeVolumes")
 
 	for n, tag := range tags {
 		values.Add(fmt.Sprintf("Filter.%d.Name", n+1), "tag:"+tag.Key)
 		values.Add(fmt.Sprintf("Filter.%d.Value", n+1), tag.Value)
 	}
-	req.URL.RawQuery = values.Encode()
 
-	res, err := ebs.signedRequest(req)
+	b, err := sr.SignedRequest(values)
 	if err != nil {
 		return nil, err
-	}
-
-	b, _ := ioutil.ReadAll(res.Body)
-	if res.StatusCode != 200 {
-		return nil, errors.New(string(b))
 	}
 
 	set := new(EbsVolumeSet)
@@ -203,24 +124,14 @@ func (ebs *EbsClient) VolumesByTags(tags []TagItem) ([]EbsVolume, error) {
 }
 
 // VolumeById will return the volume that matches the specified id.
-func (ebs *EbsClient) VolumeById(id string) (*EbsVolume, error) {
-	req, err := http.NewRequest("GET", ebs.endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	values := req.URL.Query()
+func VolumeById(sr SignedRequester, id string) (*EbsVolume, error) {
+	values := make(url.Values)
 	values.Add("Action", "DescribeVolumes")
 	values.Add("VolumeId.1", id)
-	req.URL.RawQuery = values.Encode()
 
-	res, err := ebs.signedRequest(req)
+	b, err := sr.SignedRequest(values)
 	if err != nil {
 		return nil, err
-	}
-
-	b, _ := ioutil.ReadAll(res.Body)
-	if res.StatusCode != 200 {
-		return nil, errors.New(string(b))
 	}
 
 	set := new(EbsVolumeSet)
@@ -235,12 +146,8 @@ func (ebs *EbsClient) VolumeById(id string) (*EbsVolume, error) {
 }
 
 // CreateVolume creates a new volume using specified properties.
-func (ebs *EbsClient) CreateVolume(size uint, piops uint, ssd bool, az, snapshot string, tags []TagItem) (*EbsVolume, error) {
-	req, err := http.NewRequest("GET", ebs.endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	values := req.URL.Query()
+func CreateVolume(sr SignedRequester, size uint, piops uint, ssd bool, az, snapshot string, tags []TagItem) (*EbsVolume, error) {
+	values := make(url.Values)
 	values.Add("Action", "CreateVolume")
 	values.Add("Size", strconv.Itoa(int(size)))
 	values.Add("AvailabilityZone", az)
@@ -260,16 +167,9 @@ func (ebs *EbsClient) CreateVolume(size uint, piops uint, ssd bool, az, snapshot
 		values.Add("VolumeType", "standard")
 	}
 
-	req.URL.RawQuery = values.Encode()
-
-	res, err := ebs.signedRequest(req)
+	b, err := sr.SignedRequest(values)
 	if err != nil {
 		return nil, err
-	}
-
-	b, _ := ioutil.ReadAll(res.Body)
-	if res.StatusCode != 200 {
-		return nil, errors.New(string(b))
 	}
 
 	vol := new(EbsVolume)
@@ -279,66 +179,45 @@ func (ebs *EbsClient) CreateVolume(size uint, piops uint, ssd bool, az, snapshot
 
 	// Volume is created, but creating tags is a separate request
 	if len(tags) > 0 {
-		if err = ebs.tagResource(vol.Id, tags); err != nil {
+		if err = TagResource(sr, vol.Id, tags); err != nil {
 			return nil, err
 		}
 	}
 	return vol, nil
 }
 
-func (ebs *EbsClient) DeleteVolume(id string) error {
-	req, err := http.NewRequest("GET", ebs.endpoint, nil)
-	if err != nil {
-		return err
-	}
-	values := req.URL.Query()
+func DeleteVolume(sr SignedRequester, id string) error {
+	values := make(url.Values)
 	values.Add("Action", "DeleteVolume")
 	values.Add("VolumeId", id)
-	req.URL.RawQuery = values.Encode()
 
-	res, err := ebs.signedRequest(req)
-	if err != nil {
+	if _, err := sr.SignedRequest(values); err != nil {
 		return err
-	}
-
-	b, _ := ioutil.ReadAll(res.Body)
-	if res.StatusCode != 200 {
-		return errors.New(string(b))
 	}
 
 	return nil
 }
 
-func (ebs *EbsClient) tagResource(id string, tags []TagItem) error {
-	req, err := http.NewRequest("GET", ebs.endpoint, nil)
-	if err != nil {
-		return err
-	}
-	values := req.URL.Query()
+func TagResource(sr SignedRequester, id string, tags []TagItem) error {
+	values := make(url.Values)
 	values.Add("Action", "CreateTags")
 	values.Add("ResourceId.1", id)
+
 	for n, tag := range tags {
 		values.Add(fmt.Sprintf("Tag.%d.Key", n+1), tag.Key)
 		values.Add(fmt.Sprintf("Tag.%d.Value", n+1), tag.Value)
 	}
-	req.URL.RawQuery = values.Encode()
 
-	res, err := ebs.signedRequest(req)
-	if err != nil {
+	if _, err := sr.SignedRequest(values); err != nil {
 		return err
-	}
-
-	if res.StatusCode != 200 {
-		b, _ := ioutil.ReadAll(res.Body)
-		return errors.New(string(b))
 	}
 
 	return nil
 }
 
-func (ebs *EbsClient) AttachVolume(id, instance string) (device string, err error) {
+func AttachVolume(sr SignedRequester, id, instance string) (device string, err error) {
 	var mapping []DeviceMapping
-	mapping, err = ebs.getBlockDeviceMapping(instance)
+	mapping, err = GetBlockDeviceMapping(sr, instance)
 	if err != nil {
 		return
 	}
@@ -355,82 +234,41 @@ func (ebs *EbsClient) AttachVolume(id, instance string) (device string, err erro
 		}
 	}
 
-	var req *http.Request
-	req, err = http.NewRequest("GET", ebs.endpoint, nil)
-	if err != nil {
-		return
-	}
-
-	values := req.URL.Query()
+	values := make(url.Values)
 	values.Add("Action", "AttachVolume")
 	values.Add("InstanceId", instance)
 	values.Add("VolumeId", id)
 	values.Add("Device", device)
-	req.URL.RawQuery = values.Encode()
 
-	res, err := ebs.signedRequest(req)
-	if err != nil {
-		return
-	}
-
-	if res.StatusCode != 200 {
-		b, _ := ioutil.ReadAll(res.Body)
-		err = errors.New(string(b))
-	}
-
+	_, err = sr.SignedRequest(values)
 	return
 }
 
-func (ebs *EbsClient) DetachVolume(id string) (status AttachementStatus, err error) {
-	var req *http.Request
-	req, err = http.NewRequest("GET", ebs.endpoint, nil)
-	if err != nil {
-		return
-	}
-
-	values := req.URL.Query()
+func DetachVolume(sr SignedRequester, id string) (AttachementStatus, error) {
+	values := make(url.Values)
 	values.Add("Action", "DetachVolume")
 	values.Add("VolumeId", id)
-	req.URL.RawQuery = values.Encode()
 
-	var res *http.Response
-	res, err = ebs.signedRequest(req)
+	b, err := sr.SignedRequest(values)
 	if err != nil {
-		return
-	}
-
-	b, _ := ioutil.ReadAll(res.Body)
-	if res.StatusCode != 200 {
-		err = errors.New(string(b))
-		return
+		return AttachementStatus(""), err
 	}
 
 	volres := new(EbsVolumeAttachementResponse)
 	err = xml.Unmarshal(b, volres)
-	status = volres.Status
 
-	return
+	return volres.Status, err
 }
 
-func (ebs *EbsClient) getBlockDeviceMapping(instance string) ([]DeviceMapping, error) {
-	req, err := http.NewRequest("GET", ebs.endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	values := req.URL.Query()
+func GetBlockDeviceMapping(sr SignedRequester, instance string) ([]DeviceMapping, error) {
+	values := make(url.Values)
 	values.Add("Action", "DescribeInstanceAttribute")
 	values.Add("InstanceId", instance)
 	values.Add("Attribute", "blockDeviceMapping")
-	req.URL.RawQuery = values.Encode()
 
-	res, err := ebs.signedRequest(req)
+	b, err := sr.SignedRequest(values)
 	if err != nil {
 		return nil, err
-	}
-
-	b, _ := ioutil.ReadAll(res.Body)
-	if res.StatusCode != 200 {
-		return nil, errors.New(string(b))
 	}
 
 	m := &struct {
@@ -445,25 +283,15 @@ func (ebs *EbsClient) getBlockDeviceMapping(instance string) ([]DeviceMapping, e
 	return m.Mappings.Item, nil
 }
 
-func (ebs *EbsClient) CreateSnapshot(volume, description string) (*EbsSnapshot, error) {
-	req, err := http.NewRequest("GET", ebs.endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	values := req.URL.Query()
+func CreateSnapshot(sr SignedRequester, volume, description string) (*EbsSnapshot, error) {
+	values := make(url.Values)
 	values.Add("Action", "CreateSnapshot")
 	values.Add("Description", description)
 	values.Add("VolumeId", volume)
-	req.URL.RawQuery = values.Encode()
 
-	res, err := ebs.signedRequest(req)
+	b, err := sr.SignedRequest(values)
 	if err != nil {
 		return nil, err
-	}
-
-	b, _ := ioutil.ReadAll(res.Body)
-	if res.StatusCode != 200 {
-		return nil, errors.New(string(b))
 	}
 
 	snap := new(EbsSnapshot)
@@ -474,24 +302,14 @@ func (ebs *EbsClient) CreateSnapshot(volume, description string) (*EbsSnapshot, 
 	return snap, nil
 }
 
-func (ebs *EbsClient) SnapshotById(id string) (*EbsSnapshot, error) {
-	req, err := http.NewRequest("GET", ebs.endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	values := req.URL.Query()
+func SnapshotById(sr SignedRequester, id string) (*EbsSnapshot, error) {
+	values := make(url.Values)
 	values.Add("Action", "DescribeSnapshots")
 	values.Add("SnapshotId.1", id)
-	req.URL.RawQuery = values.Encode()
 
-	res, err := ebs.signedRequest(req)
+	b, err := sr.SignedRequest(values)
 	if err != nil {
 		return nil, err
-	}
-
-	b, _ := ioutil.ReadAll(res.Body)
-	if res.StatusCode != 200 {
-		return nil, errors.New(string(b))
 	}
 
 	snapset := new(EbsSnapshotSet)
@@ -505,24 +323,13 @@ func (ebs *EbsClient) SnapshotById(id string) (*EbsSnapshot, error) {
 	return &snapset.SnapshotSet.Items[0], nil
 }
 
-func (ebs *EbsClient) DeleteSnapshot(id string) error {
-	req, err := http.NewRequest("GET", ebs.endpoint, nil)
-	if err != nil {
-		return err
-	}
-	values := req.URL.Query()
+func DeleteSnapshot(sr SignedRequester, id string) error {
+	values := make(url.Values)
 	values.Add("Action", "DeleteSnapshot")
 	values.Add("SnapshotId", id)
-	req.URL.RawQuery = values.Encode()
 
-	res, err := ebs.signedRequest(req)
-	if err != nil {
+	if _, err := sr.SignedRequest(values); err != nil {
 		return err
-	}
-
-	b, _ := ioutil.ReadAll(res.Body)
-	if res.StatusCode != 200 {
-		return errors.New(string(b))
 	}
 
 	return nil

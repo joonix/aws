@@ -51,12 +51,9 @@ func TestVolumeByName(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ebs, err := NewEbsClient(http.DefaultClient, ts.URL, defaultSigner)
-	if err != nil {
-		t.Error(err)
-	}
+	sr := NewSignedRequester(http.DefaultClient, ts.URL, DefaultSigner)
 
-	vol, err := ebs.VolumesByTags([]TagItem{TagItem{"Name", "test"}})
+	vol, err := VolumesByTags(sr, []TagItem{TagItem{"Name", "test"}})
 	if err != nil {
 		t.Error(err)
 	}
@@ -120,16 +117,13 @@ func TestCreateNew(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ebs, err := NewEbsClient(http.DefaultClient, ts.URL, defaultSigner)
-	if err != nil {
-		t.Error(err)
-	}
+	sr := NewSignedRequester(http.DefaultClient, ts.URL, DefaultSigner)
 
 	tags := []TagItem{
 		TagItem{"Name", "test"},
 		TagItem{"Stack", "joonix-testing"},
 	}
-	testVolume, err := ebs.CreateVolume(1, 0, false, "eu-west-1a", "", tags)
+	testVolume, err := CreateVolume(sr, 1, 0, false, "eu-west-1a", "", tags)
 	if err != nil {
 		t.Error(err)
 	}
@@ -144,25 +138,28 @@ func TestCreateNew(t *testing.T) {
 func TestCreateNewPiops(t *testing.T) {
 	called := false
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
 		if vt := r.URL.Query().Get("VolumeType"); vt != "io1" {
 			t.Error("Expected VolumeType to be io1")
 		}
-		called = true
+		fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?>
+<CreateTagsResponse xmlns="http://ec2.amazonaws.com/doc/2014-05-01/">
+    <requestId>80dab6e0-26ae-4334-b957-0862302aba30</requestId>
+    <return>true</return>
+</CreateTagsResponse>`)
 	}))
 	defer ts.Close()
 
-	ebs, err := NewEbsClient(http.DefaultClient, ts.URL, defaultSigner)
-	if err != nil {
-		t.Error(err)
-	}
-	_, err = ebs.CreateVolume(1, 1000, false, "eu-west-1a", "", []TagItem{})
-	if err == nil {
+	sr := NewSignedRequester(http.DefaultClient, ts.URL, DefaultSigner)
+	if _, err := CreateVolume(sr, 1, 1000, false, "eu-west-1a", "", []TagItem{}); err == nil {
 		t.Error("Was expecting an error")
 	} else if err.Error() != "Provisioned IOPS volumes are only available as SSD" {
 		t.Error("Unexpected error", err)
 	}
 
-	_, err = ebs.CreateVolume(1, 1000, true, "eu-west-1a", "", []TagItem{})
+	if _, err := CreateVolume(sr, 1, 1000, true, "eu-west-1a", "", []TagItem{}); err != nil {
+		t.Error(err)
+	}
 	if !called {
 		t.Error("No request was made")
 	}
@@ -217,12 +214,9 @@ func TestAttachVolume(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ebs, err := NewEbsClient(http.DefaultClient, ts.URL, defaultSigner)
-	if err != nil {
-		t.Error(err)
-	}
+	sr := NewSignedRequester(http.DefaultClient, ts.URL, DefaultSigner)
 
-	path, err := ebs.AttachVolume("vol-9d351996", "i-7ae3b239")
+	path, err := AttachVolume(sr, "vol-9d351996", "i-7ae3b239")
 	if err != nil {
 		t.Error(err)
 	}
@@ -252,12 +246,9 @@ func TestDetachVolume(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ebs, err := NewEbsClient(http.DefaultClient, ts.URL, defaultSigner)
-	if err != nil {
-		t.Error(err)
-	}
+	sr := NewSignedRequester(http.DefaultClient, ts.URL, DefaultSigner)
 
-	status, err := ebs.DetachVolume(*volume)
+	status, err := DetachVolume(sr, *volume)
 	if err != nil {
 		t.Error(err)
 	}
@@ -287,12 +278,9 @@ func TestCreateSnapshot(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ebs, err := NewEbsClient(http.DefaultClient, ts.URL, defaultSigner)
-	if err != nil {
-		t.Error(err)
-	}
+	sr := NewSignedRequester(http.DefaultClient, ts.URL, DefaultSigner)
 
-	snap, err := ebs.CreateSnapshot(*volume, "testing")
+	snap, err := CreateSnapshot(sr, *volume, "testing")
 	if err != nil {
 		t.Error(err)
 	}
@@ -329,12 +317,9 @@ func TestGetSnapshotById(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ebs, err := NewEbsClient(http.DefaultClient, ts.URL, defaultSigner)
-	if err != nil {
-		t.Error(err)
-	}
+	sr := NewSignedRequester(http.DefaultClient, ts.URL, DefaultSigner)
 
-	snap, err := ebs.SnapshotById("snap-1db38de7")
+	snap, err := SnapshotById(sr, "snap-1db38de7")
 	if err != nil {
 		t.Error(err)
 	}

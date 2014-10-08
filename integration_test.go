@@ -44,11 +44,8 @@ func TestVolumeByTagsIntegration(t *testing.T) {
 	}
 
 	client := &http.Client{Transport: newLoggingTransport()}
-	ebs, err := NewEbsClient(client, *endpoint, defaultSigner)
-	if err != nil {
-		t.Error(err)
-	}
-	vols, err := ebs.VolumesByTags([]TagItem{TagItem{"Name", "test"}})
+	sr := NewSignedRequester(client, *endpoint, DefaultSigner)
+	vols, err := VolumesByTags(sr, []TagItem{TagItem{"Name", "test"}})
 	if err != nil {
 		t.Error(err)
 	}
@@ -62,11 +59,8 @@ func TestVolumeByIdIntegration(t *testing.T) {
 	}
 
 	client := &http.Client{Transport: newLoggingTransport()}
-	ebs, err := NewEbsClient(client, *endpoint, defaultSigner)
-	if err != nil {
-		t.Error(err)
-	}
-	vol, err := ebs.VolumeById(*volume)
+	sr := NewSignedRequester(client, *endpoint, DefaultSigner)
+	vol, err := VolumeById(sr, *volume)
 	if err != nil {
 		t.Error(err)
 	}
@@ -84,16 +78,13 @@ func TestCreateVolumeIntegration(t *testing.T) {
 	}
 
 	client := &http.Client{Transport: newLoggingTransport()}
-	ebs, err := NewEbsClient(client, *endpoint, defaultSigner)
-	if err != nil {
-		t.Error(err)
-	}
+	sr := NewSignedRequester(client, *endpoint, DefaultSigner)
 
 	tags := []TagItem{
 		TagItem{"Name", "test"},
 		TagItem{"Stack", "joonix-testing"},
 	}
-	testVolume, err := ebs.CreateVolume(1, 0, false, "eu-west-1a", "", tags)
+	testVolume, err := CreateVolume(sr, 1, 0, false, "eu-west-1a", "", tags)
 	if err != nil {
 		t.Error(err)
 	}
@@ -108,12 +99,9 @@ func TestAttachVolumeIntegration(t *testing.T) {
 	}
 
 	client := &http.Client{Transport: newLoggingTransport()}
-	ebs, err := NewEbsClient(client, *endpoint, defaultSigner)
-	if err != nil {
-		t.Error(err)
-	}
+	sr := NewSignedRequester(client, *endpoint, DefaultSigner)
 
-	path, err := ebs.AttachVolume(*volume, *instance)
+	path, err := AttachVolume(sr, *volume, *instance)
 	if err != nil {
 		t.Error(err)
 	}
@@ -130,12 +118,9 @@ func TestDetachVolumeIntegration(t *testing.T) {
 	}
 
 	client := &http.Client{Transport: newLoggingTransport()}
-	ebs, err := NewEbsClient(client, *endpoint, defaultSigner)
-	if err != nil {
-		t.Error(err)
-	}
+	sr := NewSignedRequester(client, *endpoint, DefaultSigner)
 
-	status, err := ebs.DetachVolume(*volume)
+	status, err := DetachVolume(sr, *volume)
 	if err != nil {
 		t.Error(err)
 	}
@@ -151,12 +136,9 @@ func TestCreateSnapshotIntegration(t *testing.T) {
 	}
 
 	client := &http.Client{Transport: newLoggingTransport()}
-	ebs, err := NewEbsClient(client, *endpoint, defaultSigner)
-	if err != nil {
-		t.Error(err)
-	}
+	sr := NewSignedRequester(client, *endpoint, DefaultSigner)
 
-	testSnapshot, err := ebs.CreateSnapshot(*volume, "integration-test")
+	testSnapshot, err := CreateSnapshot(sr, *volume, "integration-test")
 	if err != nil {
 		t.Error(err)
 	}
@@ -171,11 +153,8 @@ func TestSnapshotByIdIntegration(t *testing.T) {
 	}
 
 	client := &http.Client{Transport: newLoggingTransport()}
-	ebs, err := NewEbsClient(client, *endpoint, defaultSigner)
-	if err != nil {
-		t.Error(err)
-	}
-	snap, err := ebs.SnapshotById(*snapshot)
+	sr := NewSignedRequester(client, *endpoint, DefaultSigner)
+	snap, err := SnapshotById(sr, *snapshot)
 	if err != nil {
 		t.Error(err)
 	}
@@ -193,12 +172,8 @@ func TestDeleteSnapshotIntegration(t *testing.T) {
 	}
 
 	client := &http.Client{Transport: newLoggingTransport()}
-	ebs, err := NewEbsClient(client, *endpoint, defaultSigner)
-	if err != nil {
-		t.Error(err)
-	}
-	err = ebs.DeleteSnapshot(*snapshot)
-	if err != nil {
+	sr := NewSignedRequester(client, *endpoint, DefaultSigner)
+	if err := DeleteSnapshot(sr, *snapshot); err != nil {
 		t.Error(err)
 	}
 }
@@ -210,12 +185,8 @@ func TestDeleteVolumeIntegration(t *testing.T) {
 	}
 
 	client := &http.Client{Transport: newLoggingTransport()}
-	ebs, err := NewEbsClient(client, *endpoint, defaultSigner)
-	if err != nil {
-		t.Error(err)
-	}
-	err = ebs.DeleteVolume(*volume)
-	if err != nil {
+	sr := NewSignedRequester(client, *endpoint, DefaultSigner)
+	if err := DeleteVolume(sr, *volume); err != nil {
 		t.Error(err)
 	}
 }

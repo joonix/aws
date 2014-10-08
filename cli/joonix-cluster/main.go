@@ -21,15 +21,12 @@ func init() {
 }
 
 func detachEbs(c *cli.Context) {
-	client, err := aws.NewEbsClient(sslClient, c.GlobalString("endpoint"), nil)
-	if err != nil {
-		log.Fatal(err)
-	}
+	sr := aws.NewSignedRequester(sslClient, c.GlobalString("endpoint"), nil)
 
 	tags := []aws.TagItem{
 		aws.TagItem{"Name", c.String("name")},
 	}
-	vols, err := client.VolumesByTags(tags)
+	vols, err := aws.VolumesByTags(sr, tags)
 	if err != nil {
 		log.Fatalf("Not able to find the volume by name %s: %s", c.String("name"), err)
 	}
@@ -37,7 +34,7 @@ func detachEbs(c *cli.Context) {
 	if len(vols) != 1 {
 		log.Fatalf("Expected exactly one volume by the name %s", c.String("name"))
 	}
-	status, err := client.DetachVolume(vols[0].Id)
+	status, err := aws.DetachVolume(sr, vols[0].Id)
 	if err != nil {
 		log.Fatalf("Could not detach volume: %s", err)
 	}
@@ -45,16 +42,13 @@ func detachEbs(c *cli.Context) {
 }
 
 func attachEbs(c *cli.Context) {
-	client, err := aws.NewEbsClient(sslClient, c.GlobalString("endpoint"), nil)
-	if err != nil {
-		log.Fatal(err)
-	}
+	sr := aws.NewSignedRequester(sslClient, c.GlobalString("endpoint"), nil)
 
 	// See if a volume already exists and is in the same AZ as us
 	tags := []aws.TagItem{
 		aws.TagItem{"Name", c.String("name")},
 	}
-	vols, err := client.VolumesByTags(tags)
+	vols, err := aws.VolumesByTags(sr, tags)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -72,7 +66,7 @@ func attachEbs(c *cli.Context) {
 	if len(vols) == 1 {
 		if vols[0].AvailabilityZone != instanceAz {
 			// Volume needs to be migrated to the same AZ as the instance by using a snapshot.
-			snap, err := client.CreateSnapshot(vols[0].Id, "migrate_zone")
+			snap, err := aws.CreateSnapshot(sr, vols[0].Id, "migrate_zone")
 			if err != nil {
 				log.Fatalf("Error creating snapshot: %s", err)
 			}
@@ -84,7 +78,7 @@ func attachEbs(c *cli.Context) {
 				defer close(wait)
 				for {
 					time.Sleep(time.Second)
-					snap, err := client.SnapshotById(snapshot)
+					snap, err := aws.SnapshotById(sr, snapshot)
 					if err != nil {
 						log.Fatalf("Could not update snapshot status for %s", snapshot)
 					}
@@ -98,7 +92,7 @@ func attachEbs(c *cli.Context) {
 				log.Fatalf("Timed out waiting for snapshot %s to complete", snapshot)
 			case <-wait:
 				log.Println("Created snapshot", snapshot)
-				if err := client.DeleteVolume(vols[0].Id); err != nil {
+				if err := aws.DeleteVolume(sr, vols[0].Id); err != nil {
 					log.Printf("WARNING: Was not able to delete old volume %s\n", vols[0].Id)
 				}
 			}
@@ -111,7 +105,7 @@ func attachEbs(c *cli.Context) {
 
 	if volume == nil {
 		var err error
-		if volume, err = client.CreateVolume(uint(c.Int("size")), uint(c.Int("piops")), c.Bool("ssd"), instanceAz, snapshot, tags); err != nil {
+		if volume, err = aws.CreateVolume(sr, uint(c.Int("size")), uint(c.Int("piops")), c.Bool("ssd"), instanceAz, snapshot, tags); err != nil {
 			log.Fatal(err)
 		} else {
 			wait := make(chan bool)
@@ -119,7 +113,7 @@ func attachEbs(c *cli.Context) {
 				defer close(wait)
 				for {
 					time.Sleep(time.Second)
-					if volume, err = client.VolumeById(volume.Id); err != nil {
+					if volume, err = aws.VolumeById(sr, volume.Id); err != nil {
 						log.Fatalf("Could not update volume status for %s", volume.Id)
 					}
 					if volume.Status == aws.VolumeAvailable {
@@ -147,7 +141,7 @@ func attachEbs(c *cli.Context) {
 	}
 
 	// Finally attach volume and print path
-	path, err := client.AttachVolume(volume.Id, instanceId)
+	path, err := aws.AttachVolume(sr, volume.Id, instanceId)
 	if err != nil {
 		log.Fatalf("Could not attach volume: %s\n", err)
 	}
